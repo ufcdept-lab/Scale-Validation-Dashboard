@@ -29,7 +29,7 @@ def add_manual_weight():
 def save_to_history(part_no, sample_size, apw, std, cv, max_error, status, raw_weights):
     history_file = "validation_history.csv"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    raw_str = ", ".join([f"{w:.4f}" for w in raw_weights]) # แปลง raw data เป็นข้อความ
+    raw_str = ", ".join([f"{w:.4f}" for w in raw_weights])
     
     data = {
         "Timestamp": [timestamp],
@@ -96,9 +96,8 @@ with st.sidebar:
         st.rerun()
 
 # ==================== MAIN UI (TABS) ====================
-st.title("Scale Counting Validation Dashboard v9.0")
+st.title("Scale Counting Validation Dashboard v9.1")
 
-# สร้าง Tabs เพื่อแยกหน้า Dashboard กับหน้า History
 tab1, tab2 = st.tabs(["📊 Dashboard & Analysis", "📁 History Logs (ประวัติการตรวจสอบ)"])
 
 # -------------------- TAB 1: DASHBOARD --------------------
@@ -193,12 +192,12 @@ with tab1:
 
         if n > 1:
             with col_b4:
-                # 1. ปุ่ม Save History
+                # ปุ่ม Save History
                 if st.button("💾 Save Record to History", type="primary", use_container_width=True):
                     save_to_history(part_no, n, mean_val, sd_val, cv_val, error_pieces, status_result, weights)
                     st.success(f"บันทึกประวัติ Part: {part_no} เรียบร้อยแล้ว! (ดูได้ที่แท็บ History Logs)")
 
-                # 2. ปุ่ม Download PDF
+                # ปุ่ม Download PDF
                 buffer = io.BytesIO()
                 with PdfPages(buffer) as pdf:
                     pdf_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white') 
@@ -302,34 +301,69 @@ with tab2:
     st.header("🗄️ Validation History Database")
     history_file = "validation_history.csv"
     
-    if os.path.isfile(history_file):
+    # ตรวจสอบว่าไฟล์มีอยู่และมีข้อมูลหรือไม่
+    if os.path.isfile(history_file) and os.path.getsize(history_file) > 0:
         df_history = pd.read_csv(history_file)
         
-        # ค้นหาตาม Part Number ได้
-        search_part = st.text_input("🔍 Search by Part Number:")
-        if search_part:
-            df_history = df_history[df_history['Part Number'].astype(str).str.contains(search_part, case=False)]
+        if df_history.empty:
+            st.info("ยังไม่มีประวัติการตรวจสอบครับ (ข้อมูลว่างเปล่า)")
+        else:
+            search_part = st.text_input("🔍 Search by Part Number:")
+            if search_part:
+                df_display = df_history[df_history['Part Number'].astype(str).str.contains(search_part, case=False)]
+            else:
+                df_display = df_history
+                
+            st.write(f"พบข้อมูลทั้งหมด {len(df_display)} รายการ")
             
-        st.write(f"พบข้อมูลทั้งหมด {len(df_history)} รายการ")
-        
-        # แสดงตารางประวัติการทำงาน (ไฮไลต์สี Pass/Fail ได้ด้วย)
-        def color_status(val):
-            color = '#28a745' if val == 'PASSED' else '#dc3545'
-            return f'color: {color}; font-weight: bold'
+            def color_status(val):
+                color = '#28a745' if val == 'PASSED' else '#dc3545'
+                return f'color: {color}; font-weight: bold'
+                
+            st.dataframe(
+                df_display.style.map(color_status, subset=['Status']), 
+                use_container_width=True, 
+                hide_index=True
+            )
             
-        st.dataframe(
-            df_history.style.map(color_status, subset=['Status']), 
-            use_container_width=True, 
-            hide_index=True
-        )
-        
-        # ปุ่มโหลดประวัติเป็น Excel สำหรับส่ง Report รายเดือน
-        csv = df_history.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 Download History to CSV (สำหรับ Excel)",
-            data=csv,
-            file_name="Master_Validation_History.csv",
-            mime="text/csv",
-        )
+            # ปุ่มโหลด Excel
+            csv = df_history.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 Download History to CSV",
+                data=csv,
+                file_name="Master_Validation_History.csv",
+                mime="text/csv",
+            )
+
+            # --- โซนจัดการลบข้อมูล (Delete Management) ---
+            st.divider()
+            with st.expander("🗑️ Data Management (จัดการลบข้อมูล)"):
+                st.warning("⚠️ ระวัง: ข้อมูลที่ถูกลบจะไม่สามารถกู้คืนได้")
+                
+                col_del1, col_del2 = st.columns(2)
+                
+                with col_del1:
+                    st.markdown("**ลบทีละรายการ (Delete Specific Record)**")
+                    # ดึงเวลาและ Part Number มาเป็นตัวเลือกให้รู้ว่ากำลังจะลบอะไร
+                    record_options = ["-- เลือกรายการที่ต้องการลบ --"] + (df_history['Timestamp'].astype(str) + " | Part: " + df_history['Part Number'].astype(str)).tolist()
+                    selected_record = st.selectbox("เลือกรายการ:", record_options, label_visibility="collapsed")
+                    
+                    if st.button("🗑️ ลบรายการที่เลือก", type="primary"):
+                        if selected_record != "-- เลือกรายการที่ต้องการลบ --":
+                            # แกะเอาเฉพาะ Timestamp ไปค้นหาเพื่อลบ
+                            target_timestamp = selected_record.split(" | ")[0]
+                            df_history = df_history[df_history['Timestamp'] != target_timestamp]
+                            df_history.to_csv(history_file, index=False, encoding='utf-8-sig')
+                            st.success(f"✅ ลบข้อมูลเวลา {target_timestamp} สำเร็จ!")
+                            st.rerun()
+                            
+                with col_del2:
+                    st.markdown("**ลบข้อมูลทั้งหมด (Clear All History)**")
+                    st.write("ปุ่มนี้จะทำการล้างประวัติทั้งหมดในระบบทันที")
+                    if st.button("🚨 ล้างประวัติทั้งหมด (Clear All)", type="primary"):
+                        os.remove(history_file)
+                        st.success("✅ ล้างประวัติทั้งหมดเรียบร้อยแล้ว!")
+                        st.rerun()
+
     else:
-        st.info("ยังไม่มีประวัติการตรวจสอบครับ ลองกดปุ่ม 'Save Record to History' ในหน้า Dashboard ดูสิครับ!")
+        st.info("ยังไม่มีประวัติการตรวจสอบครับ ลองกลับไปที่หน้า Dashboard แล้วกดปุ่ม 'Save Record to History' เพื่อเริ่มเก็บข้อมูลได้เลยครับ!")
