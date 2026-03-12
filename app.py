@@ -61,7 +61,7 @@ with st.sidebar:
     
     col1, col2 = st.columns(2)
     with col1: target_qty = st.number_input("Sample Size:", min_value=1, value=30)
-    with col2: full_snp = st.number_input("Full SNP:", min_value=1, value=100)
+    with col2: full_snp = st.number_input("Full SNP:", min_value=1, value=30)
     
     st.divider()
     
@@ -380,4 +380,5 @@ with tab2:
                         st.rerun()
 
     else:
+
         st.info("ยังไม่มีประวัติการตรวจสอบครับ ลองกลับไปที่หน้า Dashboard แล้วกดปุ่ม 'Save Record to History' เพื่อเริ่มเก็บข้อมูลได้เลยครับ!")
