@@ -70,7 +70,7 @@ with st.sidebar:
         st.rerun()
 
 # ==================== MAIN DASHBOARD ====================
-st.title("Scale Counting Validation Dashboard v8.1")
+st.title("Scale Counting Validation Dashboard v8.2")
 
 weights = st.session_state.weights
 n = len(weights)
@@ -169,13 +169,14 @@ else:
             buffer = io.BytesIO()
             with PdfPages(buffer) as pdf:
                 # --- PAGE 1: DASHBOARD ---
-                pdf_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white') # A4 Size, White background
+                pdf_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white') 
                 
                 pdf_fig.text(0.5, 0.94, "ZERO DEFECT: SCALE VALIDATION REPORT", fontsize=18, weight='bold', ha='center', color='black')
                 pdf_fig.text(0.1, 0.89, f"Part Number: {part_no}", fontsize=12, color='black')
                 pdf_fig.text(0.1, 0.86, f"Sample Size: {n} pcs", fontsize=12, color='black')
                 pdf_fig.text(0.55, 0.89, f"Full SNP Target: {full_snp} pcs/pack", fontsize=12, weight='bold', color='black')
-                pdf_fig.add_artist(plt.Line2D((0.1, 0.92), (0.9, 0.92), color='black', linewidth=1.5))
+                
+                # ลบเส้นเอียงออกเรียบร้อยแล้วครับ
                 
                 status_pdf = "PASSED" if error_pieces <= 0.5 else "FAILED (Miscount Risk)"
                 pdf_fig.text(0.1, 0.80, "Analysis Result:", fontsize=14, weight='bold', color='black')
@@ -191,7 +192,6 @@ else:
                 ax3_p = pdf_fig.add_axes([0.1, 0.15, 0.35, 0.15])
                 ax4_p = pdf_fig.add_axes([0.55, 0.15, 0.35, 0.15])
 
-                # Set light theme for all PDF axes
                 for ax in [ax1_p, ax2_p, ax3_p, ax4_p]:
                     ax.set_facecolor('white')
                     ax.tick_params(colors='black')
@@ -234,9 +234,9 @@ else:
                 pdf.savefig(pdf_fig)
                 plt.close(pdf_fig)
 
-                # --- PAGE 2+: RAW DATA SUPPORT (4 COLUMNS) ---
+                # --- PAGE 2+: RAW DATA SUPPORT ---
                 MAX_ROWS_PER_COL = 40
-                MAX_COLS_PER_PAGE = 4 # เพิ่มเป็น 4 คอลัมน์
+                MAX_COLS_PER_PAGE = 4 
                 MAX_ITEMS_PER_PAGE = MAX_ROWS_PER_COL * MAX_COLS_PER_PAGE
                 
                 pages_needed = math.ceil(n / MAX_ITEMS_PER_PAGE)
@@ -245,10 +245,11 @@ else:
                     data_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white')
                     data_fig.text(0.5, 0.92, f"RAW DATA RECORD (Page {page_num+1}/{pages_needed})", fontsize=16, weight='bold', ha='center', color='black')
                     data_fig.text(0.1, 0.86, f"Part Number: {part_no}", fontsize=11, color='black')
-                    data_fig.add_artist(plt.Line2D((0.1, 0.88), (0.9, 0.88), color='black'))
+                    
+                    # ลบเส้นเอียงออกเรียบร้อยแล้วครับ
                     
                     y_pos = 0.83
-                    col_x = [0.10, 0.32, 0.54, 0.76] # จัดระยะ 4 คอลัมน์ให้เต็มหน้ากระดาษพอดี
+                    col_x = [0.10, 0.32, 0.54, 0.76] 
                     current_col = 0
                     
                     start_idx = page_num * MAX_ITEMS_PER_PAGE
@@ -257,11 +258,11 @@ else:
                     for i in range(start_idx, end_idx):
                         w = weights[i]
                         data_fig.text(col_x[current_col], y_pos, f"#{i+1:03d}: {w:.4f}g", fontsize=10, fontfamily='monospace', color='black')
-                        y_pos -= 0.018 # ขยับบรรทัดให้ชิดขึ้น
+                        y_pos -= 0.018 
                         
-                        if y_pos < 0.08: # ถ้าสุดหน้ากระดาษด้านล่าง
-                            y_pos = 0.83 # ปัดขึ้นข้างบน
-                            current_col += 1 # เปลี่ยนคอลัมน์
+                        if y_pos < 0.08: 
+                            y_pos = 0.83 
+                            current_col += 1 
                             
                     pdf.savefig(data_fig)
                     plt.close(data_fig)
