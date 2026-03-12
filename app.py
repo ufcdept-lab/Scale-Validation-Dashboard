@@ -25,6 +25,9 @@ def add_manual_weight():
         st.session_state.weights.append(val)
         st.session_state.weight_input = 0.0
 
+def delete_item(index):
+    st.session_state.weights.pop(index)
+
 # ฟังก์ชันบันทึกประวัติลงไฟล์ CSV
 def save_to_history(part_no, sample_size, apw, std, cv, max_error, status, raw_weights):
     history_file = "validation_history.csv"
@@ -60,9 +63,24 @@ with st.sidebar:
     
     st.divider()
     
-    st.subheader("⚖️ Manual Input (g)")
+    st.subheader("⚖️ Weight Input (g)")
     st.number_input("Enter Weight:", min_value=0.0, step=0.0001, format="%.4f", key="weight_input", on_change=add_manual_weight)
     
+    # --- NEW: เอา List รายการชิ้นงานที่คีย์กลับมาแล้วครับ ---
+    st.markdown("**📝 Data List (รายการที่ชั่งแล้ว)**")
+    
+    # สร้างกล่องจำกัดความสูง (Scrollable Container) เพื่อไม่ให้ Sidebar ยาวเกินไป
+    list_container = st.container(height=300) 
+    with list_container:
+        if len(st.session_state.weights) == 0:
+            st.caption("ยังไม่มีข้อมูล...")
+        else:
+            for i, w in enumerate(st.session_state.weights):
+                c1, c2 = st.columns([3, 1])
+                c1.markdown(f"**#{i+1:02d}:** `{w:.4f} g`")
+                # ปุ่มลบทีละบรรทัด
+                c2.button("❌", key=f"del_{i}_{w}_{datetime.now().microsecond}", on_click=delete_item, args=(i,))
+
     st.divider()
     
     st.subheader("📁 Excel / CSV Upload")
@@ -96,7 +114,7 @@ with st.sidebar:
         st.rerun()
 
 # ==================== MAIN UI (TABS) ====================
-st.title("Scale Counting Validation Dashboard v9.1")
+st.title("Scale Counting Validation Dashboard v9.2")
 
 tab1, tab2 = st.tabs(["📊 Dashboard & Analysis", "📁 History Logs (ประวัติการตรวจสอบ)"])
 
@@ -192,12 +210,10 @@ with tab1:
 
         if n > 1:
             with col_b4:
-                # ปุ่ม Save History
                 if st.button("💾 Save Record to History", type="primary", use_container_width=True):
                     save_to_history(part_no, n, mean_val, sd_val, cv_val, error_pieces, status_result, weights)
                     st.success(f"บันทึกประวัติ Part: {part_no} เรียบร้อยแล้ว! (ดูได้ที่แท็บ History Logs)")
 
-                # ปุ่ม Download PDF
                 buffer = io.BytesIO()
                 with PdfPages(buffer) as pdf:
                     pdf_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white') 
@@ -255,7 +271,6 @@ with tab1:
                     pdf.savefig(pdf_fig)
                     plt.close(pdf_fig)
 
-                    # PDF Page 2+ (Raw Data)
                     MAX_ROWS_PER_COL = 40
                     MAX_COLS_PER_PAGE = 4 
                     MAX_ITEMS_PER_PAGE = MAX_ROWS_PER_COL * MAX_COLS_PER_PAGE
@@ -291,17 +306,11 @@ with tab1:
                     use_container_width=True
                 )
 
-        with st.expander("👀 View Raw Data Record"):
-            df_display = pd.DataFrame({"Sample #": range(1, n+1), "Weight (g)": weights})
-            st.dataframe(df_display, use_container_width=True)
-
-
 # -------------------- TAB 2: HISTORY LOGS --------------------
 with tab2:
     st.header("🗄️ Validation History Database")
     history_file = "validation_history.csv"
     
-    # ตรวจสอบว่าไฟล์มีอยู่และมีข้อมูลหรือไม่
     if os.path.isfile(history_file) and os.path.getsize(history_file) > 0:
         df_history = pd.read_csv(history_file)
         
@@ -326,7 +335,6 @@ with tab2:
                 hide_index=True
             )
             
-            # ปุ่มโหลด Excel
             csv = df_history.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 label="📥 Download History to CSV",
@@ -335,7 +343,6 @@ with tab2:
                 mime="text/csv",
             )
 
-            # --- โซนจัดการลบข้อมูล (Delete Management) ---
             st.divider()
             with st.expander("🗑️ Data Management (จัดการลบข้อมูล)"):
                 st.warning("⚠️ ระวัง: ข้อมูลที่ถูกลบจะไม่สามารถกู้คืนได้")
@@ -344,13 +351,11 @@ with tab2:
                 
                 with col_del1:
                     st.markdown("**ลบทีละรายการ (Delete Specific Record)**")
-                    # ดึงเวลาและ Part Number มาเป็นตัวเลือกให้รู้ว่ากำลังจะลบอะไร
                     record_options = ["-- เลือกรายการที่ต้องการลบ --"] + (df_history['Timestamp'].astype(str) + " | Part: " + df_history['Part Number'].astype(str)).tolist()
                     selected_record = st.selectbox("เลือกรายการ:", record_options, label_visibility="collapsed")
                     
                     if st.button("🗑️ ลบรายการที่เลือก", type="primary"):
                         if selected_record != "-- เลือกรายการที่ต้องการลบ --":
-                            # แกะเอาเฉพาะ Timestamp ไปค้นหาเพื่อลบ
                             target_timestamp = selected_record.split(" | ")[0]
                             df_history = df_history[df_history['Timestamp'] != target_timestamp]
                             df_history.to_csv(history_file, index=False, encoding='utf-8-sig')
