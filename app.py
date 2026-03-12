@@ -1,0 +1,218 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+import statistics
+import math
+import io
+
+# ==================== CONFIG ====================
+st.set_page_config(page_title="Scale Validation Dashboard", page_icon="⚖️", layout="wide")
+
+# ==================== SESSION STATE ====================
+if 'weights' not in st.session_state:
+    st.session_state.weights = []
+
+# ฟังก์ชันรีเซ็ตข้อมูล
+def reset_data():
+    st.session_state.weights = []
+
+# ฟังก์ชันรับค่าจาก Manual Input
+def add_manual_weight():
+    val = st.session_state.weight_input
+    if val > 0:
+        st.session_state.weights.append(val)
+        st.session_state.weight_input = 0.0 # Clear input
+
+# ==================== SIDEBAR (INPUTS) ====================
+with st.sidebar:
+    st.title("📋 Project Config")
+    part_no = st.text_input("Part Number:", value="A123456")
+    
+    col1, col2 = st.columns(2)
+    with col1: target_qty = st.number_input("Sample Size:", min_value=1, value=30)
+    with col2: full_snp = st.number_input("Full SNP:", min_value=1, value=100)
+    
+    st.divider()
+    
+    # 1. Manual Input
+    st.subheader("⚖️ Manual Input (g)")
+    st.number_input("Enter Weight:", min_value=0.0, step=0.0001, format="%.4f", key="weight_input", on_change=add_manual_weight)
+    
+    st.divider()
+    
+    # 2. Excel Upload
+    st.subheader("📁 Excel / CSV Upload")
+    uploaded_file = st.file_uploader("Choose a file", type=['xlsx', 'xls', 'csv'], label_visibility="collapsed")
+    if uploaded_file is not None:
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file, header=None)
+            else:
+                df = pd.read_excel(uploaded_file, header=None)
+            
+            new_weights = []
+            for col in df.columns:
+                numeric_col = pd.to_numeric(df[col], errors='coerce').dropna()
+                if not numeric_col.empty:
+                    new_weights.extend(numeric_col.tolist())
+                    break
+            
+            if new_weights:
+                if st.button(f"Import {len(new_weights)} Records", type="primary"):
+                    st.session_state.weights.extend(new_weights)
+                    st.success(f"Imported {len(new_weights)} records!")
+            else:
+                st.error("No numeric data found.")
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+
+    st.divider()
+    if st.button("🔄 Reset All Data", type="secondary", use_container_width=True):
+        reset_data()
+        st.rerun()
+
+# ==================== MAIN DASHBOARD ====================
+st.title("Scale Counting Validation Dashboard v8.0 (Web)")
+
+weights = st.session_state.weights
+n = len(weights)
+
+if n == 0:
+    st.info("WAITING FOR DATA: Please enter weights manually or upload a file from the sidebar.")
+else:
+    # --- Calculations ---
+    mean_val = statistics.mean(weights) if n > 0 else 0
+    sd_val = statistics.stdev(weights) if n > 1 else 0
+    cv_val = (sd_val / mean_val) * 100 if mean_val != 0 else 0
+    min_val = min(weights) if n > 0 else 0
+    max_val = max(weights) if n > 0 else 0
+    error_pieces = (3 * math.sqrt(full_snp) * sd_val) / mean_val if mean_val != 0 else 0
+
+    # --- Status Bar ---
+    if n >= 2:
+        if error_pieces <= 0.5:
+            st.success("✅ **STATUS: PASSED** (No Risk of Miscount)")
+        else:
+            st.error("❌ **STATUS: FAILED** (High Risk of Miscount!)")
+    else:
+        st.warning("⚠️ Need at least 2 samples to calculate risk.")
+
+    # --- Top Metrics ---
+    col1, col2, col3, col4 = st.columns(4)
+    status_text = "(COMPLETED)" if n >= target_qty else ""
+    col1.metric("Count / Target", f"{n} pcs", delta=status_text, delta_color="normal")
+    col2.metric("Average (APW)", f"{mean_val:.4f} g")
+    col3.metric("%CV (Precision)", f"{cv_val:.2f} %", delta="< 1.0% is good", delta_color="off")
+    col4.metric("Max Error @ Full SNP", f"± {error_pieces:.2f} pcs", 
+                delta="PASSED" if error_pieces <= 0.5 else "FAILED", 
+                delta_color="inverse" if error_pieces > 0.5 else "normal")
+
+    # --- Charts ---
+    if n > 1:
+        st.divider()
+        plt.style.use('dark_background') # ใช้ธีมมืดให้เข้ากับ Streamlit Dark Mode
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 6), dpi=100)
+        fig.patch.set_facecolor('#0e1117') # สีพื้นหลัง Streamlit
+        for ax in [ax1, ax2, ax3, ax4]:
+            ax.set_facecolor('#0e1117')
+            ax.tick_params(colors='#aaaaaa')
+            for spine in ax.spines.values(): spine.set_color('#555555')
+
+        x_seq = list(range(1, n+1))
+
+        # 1. Histogram
+        ax1.hist(weights, bins=max(5, int(n**0.5)), density=True, color='#3498db', edgecolor='white', alpha=0.7)
+        if sd_val > 0:
+            x_curve = np.linspace(min_val-sd_val, max_val+sd_val, 100)
+            y_curve = (1/(sd_val * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x_curve - mean_val)/sd_val)**2)
+            ax1.plot(x_curve, y_curve, color='#e74c3c', linewidth=2)
+        ax1.set_title("1. Distribution (Bell Curve)", color='white')
+
+        # 2. Run Chart
+        ax2.plot(x_seq, weights, marker='o', color='#2ecc71', linewidth=1.5, markersize=4)
+        ax2.axhline(y=mean_val, color='#e74c3c', linestyle='--', alpha=0.7)
+        ax2.set_title("2. Run Chart (Trend)", color='white')
+
+        # 3. Scatter Plot
+        ax3.scatter(x_seq, weights, color='#f1c40f', edgecolor='white', s=40)
+        if sd_val > 0:
+            r_matrix = np.corrcoef(x_seq, weights)
+            r_val = r_matrix[0, 1] if not np.isnan(r_matrix[0, 1]) else 0
+            z = np.polyfit(x_seq, weights, 1)
+            p = np.poly1d(z)
+            ax3.plot(x_seq, p(x_seq), color='#9b59b6', linestyle=':', linewidth=2)
+            ax3.text(0.05, 0.90, f"r = {r_val:.3f}", transform=ax3.transAxes, color='#f1c40f', weight='bold')
+        ax3.set_title("3. Scatter Plot (Correlation)", color='white')
+
+        # 4. Box Plot (With Outlier Tags)
+        bp = ax4.boxplot(weights, vert=False, patch_artist=True)
+        for patch in bp['boxes']: patch.set_facecolor('#9b59b6')
+        for median in bp['medians']: median.set(color='red', linewidth=2)
+        for flier in bp['fliers']: 
+            flier.set(marker='o', markerfacecolor='#ff3333', markeredgecolor='white', markersize=10, alpha=1.0)
+        
+        outlier_data = bp['fliers'][0].get_xdata()
+        for x_val in np.unique(outlier_data):
+            indices = [i+1 for i, w in enumerate(weights) if w == x_val]
+            label = ",".join([f"#{i}" for i in indices])
+            ax4.annotate(label, xy=(x_val, 1), xytext=(0, 12), textcoords='offset points',
+                         ha='center', va='bottom', color='#ff3333', weight='bold')
+
+        ax4.set_title("4. Box Plot (Outliers Detection)", color='white')
+        ax4.set_yticks([])
+
+        fig.tight_layout(pad=2.0)
+        st.pyplot(fig) # แสดงกราฟบน Streamlit
+
+    # --- Bottom Metrics & PDF Export ---
+    st.divider()
+    col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+    col_b1.metric("⬇️ MIN Weight", f"{min_val:.4f} g")
+    col_b2.metric("⬆️ MAX Weight", f"{max_val:.4f} g")
+    col_b3.metric("📊 STD (Standard Deviation)", f"{sd_val:.4f}")
+
+    # ระบบสร้าง PDF ในหน่วยความจำ (In-memory) สำหรับ Web App
+    if n > 1:
+        with col_b4:
+            st.write("📄 **Export Report**")
+            buffer = io.BytesIO()
+            with PdfPages(buffer) as pdf:
+                pdf_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white')
+                pdf_fig.text(0.5, 0.94, "ZERO DEFECT: SCALE VALIDATION REPORT", fontsize=18, weight='bold', ha='center', color='black')
+                pdf_fig.text(0.1, 0.89, f"Part Number: {part_no}", fontsize=12, color='black')
+                pdf_fig.text(0.1, 0.86, f"Sample Size: {n} pcs", fontsize=12, color='black')
+                pdf_fig.text(0.55, 0.89, f"Full SNP Target: {full_snp} pcs/pack", fontsize=12, weight='bold', color='black')
+                
+                status_pdf = "PASSED" if error_pieces <= 0.5 else "FAILED (Miscount Risk)"
+                pdf_fig.text(0.1, 0.80, "Analysis Result:", fontsize=14, weight='bold', color='black')
+                pdf_fig.text(0.15, 0.77, f"- Average (APW) : {mean_val:.4f} g", fontsize=12, color='black')
+                pdf_fig.text(0.15, 0.74, f"- STD           : {sd_val:.4f}", fontsize=12, color='black')
+                pdf_fig.text(0.15, 0.71, f"- Min / Max     : {min_val:.4f} g / {max_val:.4f} g", fontsize=12, color='black')
+                pdf_fig.text(0.15, 0.68, f"- Max Error     : +/- {error_pieces:.2f} pieces", fontsize=12, weight='bold', color='red' if error_pieces > 0.5 else 'green')
+                pdf_fig.text(0.15, 0.63, f"Conclusion: {status_pdf}", fontsize=16, weight='bold', color='red' if error_pieces > 0.5 else 'green')
+
+                # (ย่อโค้ดกราฟใน PDF เล็กน้อยเพื่อความกระชับ)
+                ax1_p = pdf_fig.add_axes([0.1, 0.38, 0.35, 0.15]) 
+                ax2_p = pdf_fig.add_axes([0.55, 0.38, 0.35, 0.15])
+                ax1_p.hist(weights, bins=max(5, int(n**0.5)), density=True, color='#3498db', edgecolor='black', alpha=0.6)
+                ax1_p.set_title("1. Distribution")
+                ax2_p.plot(x_seq, weights, marker='o', color='#2ecc71', markersize=3)
+                ax2_p.set_title("2. Run Chart")
+                
+                pdf.savefig(pdf_fig)
+                plt.close(pdf_fig)
+
+            st.download_button(
+                label="📥 Download PDF Report",
+                data=buffer.getvalue(),
+                file_name=f"Validation_{part_no}.pdf",
+                mime="application/pdf",
+                type="primary"
+            )
+
+    # แสดง Raw Data ด้านล่างสุดเป็นตาราง
+    with st.expander("👀 View Raw Data Record"):
+        df_display = pd.DataFrame({"Sample #": range(1, n+1), "Weight (g)": weights})
+        st.dataframe(df_display, use_container_width=True)
