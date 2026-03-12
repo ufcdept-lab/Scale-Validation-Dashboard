@@ -19,20 +19,22 @@ if 'weights' not in st.session_state:
 def reset_data():
     st.session_state.weights = []
 
+# --- ฟังก์ชันจัดการการคีย์ข้อมูล (แก้ไขให้รองรับค่าว่าง) ---
 def add_manual_weight():
     val = st.session_state.weight_input
-    if val > 0:
+    # ตรวจสอบว่ามีค่าและมากกว่า 0 ถึงจะบันทึก
+    if val is not None and val > 0:
         st.session_state.weights.append(val)
-        st.session_state.weight_input = 0.0
+        # เคลียร์ค่าให้กลับเป็นช่องว่าง (None) เพื่อรอรับชิ้นต่อไป
+        st.session_state.weight_input = None
 
 def delete_item(index):
     st.session_state.weights.pop(index)
 
-# ฟังก์ชันบันทึกประวัติลงไฟล์ CSV
 def save_to_history(part_no, sample_size, apw, std, cv, max_error, status, raw_weights):
     history_file = "validation_history.csv"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    raw_str = ", ".join([f"{w:.4f}" for w in raw_weights])
+    raw_str = ", ".join([f"{w:.2f}" for w in raw_weights])
     
     data = {
         "Timestamp": [timestamp],
@@ -64,12 +66,18 @@ with st.sidebar:
     st.divider()
     
     st.subheader("⚖️ Weight Input (g)")
-    st.number_input("Enter Weight:", min_value=0.0, step=0.0001, format="%.4f", key="weight_input", on_change=add_manual_weight)
+    # --- แก้ไขช่องรับน้ำหนัก: ค่าเริ่มต้น=None (ว่าง), ทศนิยม=2 ตำแหน่ง ---
+    st.number_input(
+        "Enter Weight:", 
+        min_value=0.0, 
+        step=0.01, 
+        format="%.2f", 
+        value=None, 
+        key="weight_input", 
+        on_change=add_manual_weight
+    )
     
-    # --- NEW: เอา List รายการชิ้นงานที่คีย์กลับมาแล้วครับ ---
     st.markdown("**📝 Data List (รายการที่ชั่งแล้ว)**")
-    
-    # สร้างกล่องจำกัดความสูง (Scrollable Container) เพื่อไม่ให้ Sidebar ยาวเกินไป
     list_container = st.container(height=300) 
     with list_container:
         if len(st.session_state.weights) == 0:
@@ -77,8 +85,8 @@ with st.sidebar:
         else:
             for i, w in enumerate(st.session_state.weights):
                 c1, c2 = st.columns([3, 1])
-                c1.markdown(f"**#{i+1:02d}:** `{w:.4f} g`")
-                # ปุ่มลบทีละบรรทัด
+                # --- แก้ไขการแสดงผล List ให้เป็นทศนิยม 2 ตำแหน่ง ---
+                c1.markdown(f"**#{i+1:02d}:** `{w:.2f} g`")
                 c2.button("❌", key=f"del_{i}_{w}_{datetime.now().microsecond}", on_click=delete_item, args=(i,))
 
     st.divider()
@@ -114,7 +122,7 @@ with st.sidebar:
         st.rerun()
 
 # ==================== MAIN UI (TABS) ====================
-st.title("Scale Counting Validation Dashboard v9.2")
+st.title("Scale Counting Validation Dashboard v9.3")
 
 tab1, tab2 = st.tabs(["📊 Dashboard & Analysis", "📁 History Logs (ประวัติการตรวจสอบ)"])
 
@@ -289,7 +297,8 @@ with tab1:
                         
                         for i in range(start_idx, end_idx):
                             w = weights[i]
-                            data_fig.text(col_x[current_col], y_pos, f"#{i+1:03d}: {w:.4f}g", fontsize=10, fontfamily='monospace', color='black')
+                            # PDF แสดงทศนิยม 2 ตำแหน่ง
+                            data_fig.text(col_x[current_col], y_pos, f"#{i+1:03d}: {w:.2f}g", fontsize=10, fontfamily='monospace', color='black')
                             y_pos -= 0.018 
                             if y_pos < 0.08: 
                                 y_pos = 0.83 
