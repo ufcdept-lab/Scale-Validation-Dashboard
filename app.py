@@ -6,6 +6,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 import statistics
 import math
 import io
+import os
+from datetime import datetime
 
 # ==================== CONFIG ====================
 st.set_page_config(page_title="Scale Validation Dashboard", page_icon="⚖️", layout="wide")
@@ -22,6 +24,30 @@ def add_manual_weight():
     if val > 0:
         st.session_state.weights.append(val)
         st.session_state.weight_input = 0.0
+
+# ฟังก์ชันบันทึกประวัติลงไฟล์ CSV
+def save_to_history(part_no, sample_size, apw, std, cv, max_error, status, raw_weights):
+    history_file = "validation_history.csv"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    raw_str = ", ".join([f"{w:.4f}" for w in raw_weights]) # แปลง raw data เป็นข้อความ
+    
+    data = {
+        "Timestamp": [timestamp],
+        "Part Number": [part_no],
+        "Sample Size": [sample_size],
+        "APW (g)": [round(apw, 4)],
+        "STD": [round(std, 4)],
+        "%CV": [round(cv, 2)],
+        "Max Error (pcs)": [round(max_error, 2)],
+        "Status": [status],
+        "Raw Data": [raw_str]
+    }
+    df = pd.DataFrame(data)
+    
+    if os.path.isfile(history_file):
+        df.to_csv(history_file, mode='a', header=False, index=False, encoding='utf-8-sig')
+    else:
+        df.to_csv(history_file, mode='w', header=True, index=False, encoding='utf-8-sig')
 
 # ==================== SIDEBAR ====================
 with st.sidebar:
@@ -69,212 +95,241 @@ with st.sidebar:
         reset_data()
         st.rerun()
 
-# ==================== MAIN DASHBOARD ====================
-st.title("Scale Counting Validation Dashboard v8.2")
+# ==================== MAIN UI (TABS) ====================
+st.title("Scale Counting Validation Dashboard v9.0")
 
-weights = st.session_state.weights
-n = len(weights)
+# สร้าง Tabs เพื่อแยกหน้า Dashboard กับหน้า History
+tab1, tab2 = st.tabs(["📊 Dashboard & Analysis", "📁 History Logs (ประวัติการตรวจสอบ)"])
 
-if n == 0:
-    st.info("WAITING FOR DATA: Please enter weights manually or upload a file from the sidebar.")
-else:
-    mean_val = statistics.mean(weights) if n > 0 else 0
-    sd_val = statistics.stdev(weights) if n > 1 else 0
-    cv_val = (sd_val / mean_val) * 100 if mean_val != 0 else 0
-    min_val = min(weights) if n > 0 else 0
-    max_val = max(weights) if n > 0 else 0
-    error_pieces = (3 * math.sqrt(full_snp) * sd_val) / mean_val if mean_val != 0 else 0
+# -------------------- TAB 1: DASHBOARD --------------------
+with tab1:
+    weights = st.session_state.weights
+    n = len(weights)
 
-    if n >= 2:
-        if error_pieces <= 0.5:
-            st.success("✅ **STATUS: PASSED** (No Risk of Miscount)")
-        else:
-            st.error("❌ **STATUS: FAILED** (High Risk of Miscount!)")
+    if n == 0:
+        st.info("WAITING FOR DATA: Please enter weights manually or upload a file from the sidebar.")
     else:
-        st.warning("⚠️ Need at least 2 samples to calculate risk.")
+        mean_val = statistics.mean(weights) if n > 0 else 0
+        sd_val = statistics.stdev(weights) if n > 1 else 0
+        cv_val = (sd_val / mean_val) * 100 if mean_val != 0 else 0
+        min_val = min(weights) if n > 0 else 0
+        max_val = max(weights) if n > 0 else 0
+        error_pieces = (3 * math.sqrt(full_snp) * sd_val) / mean_val if mean_val != 0 else 0
+        status_result = "PASSED" if error_pieces <= 0.5 else "FAILED"
 
-    col1, col2, col3, col4 = st.columns(4)
-    status_text = "(COMPLETED)" if n >= target_qty else ""
-    col1.metric("Count / Target", f"{n} pcs", delta=status_text, delta_color="normal")
-    col2.metric("Average (APW)", f"{mean_val:.4f} g")
-    col3.metric("%CV (Precision)", f"{cv_val:.2f} %", delta="< 1.0% is good", delta_color="off")
-    col4.metric("Max Error @ Full SNP", f"± {error_pieces:.2f} pcs", 
-                delta="PASSED" if error_pieces <= 0.5 else "FAILED", 
-                delta_color="inverse" if error_pieces > 0.5 else "normal")
+        if n >= 2:
+            if status_result == "PASSED":
+                st.success("✅ **STATUS: PASSED** (No Risk of Miscount)")
+            else:
+                st.error("❌ **STATUS: FAILED** (High Risk of Miscount!)")
+        else:
+            st.warning("⚠️ Need at least 2 samples to calculate risk.")
 
-    # ==================== WEB CHARTS (DARK THEME) ====================
-    if n > 1:
+        col1, col2, col3, col4 = st.columns(4)
+        status_text = "(COMPLETED)" if n >= target_qty else ""
+        col1.metric("Count / Target", f"{n} pcs", delta=status_text, delta_color="normal")
+        col2.metric("Average (APW)", f"{mean_val:.4f} g")
+        col3.metric("%CV (Precision)", f"{cv_val:.2f} %", delta="< 1.0% is good", delta_color="off")
+        col4.metric("Max Error @ Full SNP", f"± {error_pieces:.2f} pcs", 
+                    delta=status_result, delta_color="inverse" if error_pieces > 0.5 else "normal")
+
+        # --- CHARTS ---
+        if n > 1:
+            st.divider()
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 6), dpi=100)
+            fig.patch.set_facecolor('#0e1117') 
+            for ax in [ax1, ax2, ax3, ax4]:
+                ax.set_facecolor('#0e1117')
+                ax.tick_params(colors='#aaaaaa')
+                for spine in ax.spines.values(): spine.set_color('#555555')
+
+            x_seq = list(range(1, n+1))
+
+            ax1.hist(weights, bins=max(5, int(n**0.5)), density=True, color='#3498db', edgecolor='white', alpha=0.7)
+            if sd_val > 0:
+                x_curve = np.linspace(min_val-sd_val, max_val+sd_val, 100)
+                y_curve = (1/(sd_val * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x_curve - mean_val)/sd_val)**2)
+                ax1.plot(x_curve, y_curve, color='#e74c3c', linewidth=2)
+            ax1.set_title("1. Distribution (Bell Curve)", color='white')
+
+            ax2.plot(x_seq, weights, marker='o', color='#2ecc71', linewidth=1.5, markersize=4)
+            ax2.axhline(y=mean_val, color='#e74c3c', linestyle='--', alpha=0.7)
+            ax2.set_title("2. Run Chart (Trend)", color='white')
+
+            ax3.scatter(x_seq, weights, color='#f1c40f', edgecolor='white', s=40)
+            if sd_val > 0:
+                r_matrix = np.corrcoef(x_seq, weights)
+                r_val = r_matrix[0, 1] if not np.isnan(r_matrix[0, 1]) else 0
+                z = np.polyfit(x_seq, weights, 1)
+                p = np.poly1d(z)
+                ax3.plot(x_seq, p(x_seq), color='#9b59b6', linestyle=':', linewidth=2)
+                ax3.text(0.05, 0.90, f"r = {r_val:.3f}", transform=ax3.transAxes, color='#f1c40f', weight='bold')
+            ax3.set_title("3. Scatter Plot (Correlation)", color='white')
+
+            bp = ax4.boxplot(weights, vert=False, patch_artist=True)
+            for patch in bp['boxes']: patch.set_facecolor('#9b59b6')
+            for median in bp['medians']: median.set(color='red', linewidth=2)
+            for flier in bp['fliers']: 
+                flier.set(marker='o', markerfacecolor='#ff3333', markeredgecolor='white', markersize=8, alpha=1.0)
+            
+            outlier_data = bp['fliers'][0].get_xdata()
+            for x_val in np.unique(outlier_data):
+                indices = [i+1 for i, w in enumerate(weights) if w == x_val]
+                label = ",".join([f"#{i}" for i in indices])
+                ax4.annotate(label, xy=(x_val, 1), xytext=(0, 12), textcoords='offset points', ha='center', va='bottom', color='#ff3333', weight='bold')
+            ax4.set_title("4. Box Plot (Outliers Detection)", color='white')
+            ax4.set_yticks([])
+
+            fig.tight_layout(pad=2.0)
+            st.pyplot(fig) 
+
         st.divider()
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 6), dpi=100)
-        fig.patch.set_facecolor('#0e1117') 
-        for ax in [ax1, ax2, ax3, ax4]:
-            ax.set_facecolor('#0e1117')
-            ax.tick_params(colors='#aaaaaa')
-            for spine in ax.spines.values(): spine.set_color('#555555')
-
-        x_seq = list(range(1, n+1))
-
-        # 1. Histogram
-        ax1.hist(weights, bins=max(5, int(n**0.5)), density=True, color='#3498db', edgecolor='white', alpha=0.7)
-        if sd_val > 0:
-            x_curve = np.linspace(min_val-sd_val, max_val+sd_val, 100)
-            y_curve = (1/(sd_val * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x_curve - mean_val)/sd_val)**2)
-            ax1.plot(x_curve, y_curve, color='#e74c3c', linewidth=2)
-        ax1.set_title("1. Distribution (Bell Curve)", color='white')
-
-        # 2. Run Chart
-        ax2.plot(x_seq, weights, marker='o', color='#2ecc71', linewidth=1.5, markersize=4)
-        ax2.axhline(y=mean_val, color='#e74c3c', linestyle='--', alpha=0.7)
-        ax2.set_title("2. Run Chart (Trend)", color='white')
-
-        # 3. Scatter Plot
-        ax3.scatter(x_seq, weights, color='#f1c40f', edgecolor='white', s=40)
-        if sd_val > 0:
-            r_matrix = np.corrcoef(x_seq, weights)
-            r_val = r_matrix[0, 1] if not np.isnan(r_matrix[0, 1]) else 0
-            z = np.polyfit(x_seq, weights, 1)
-            p = np.poly1d(z)
-            ax3.plot(x_seq, p(x_seq), color='#9b59b6', linestyle=':', linewidth=2)
-            ax3.text(0.05, 0.90, f"r = {r_val:.3f}", transform=ax3.transAxes, color='#f1c40f', weight='bold')
-        ax3.set_title("3. Scatter Plot (Correlation)", color='white')
-
-        # 4. Box Plot 
-        bp = ax4.boxplot(weights, vert=False, patch_artist=True)
-        for patch in bp['boxes']: patch.set_facecolor('#9b59b6')
-        for median in bp['medians']: median.set(color='red', linewidth=2)
-        for flier in bp['fliers']: 
-            flier.set(marker='o', markerfacecolor='#ff3333', markeredgecolor='white', markersize=8, alpha=1.0)
         
-        outlier_data = bp['fliers'][0].get_xdata()
-        for x_val in np.unique(outlier_data):
-            indices = [i+1 for i, w in enumerate(weights) if w == x_val]
-            label = ",".join([f"#{i}" for i in indices])
-            ax4.annotate(label, xy=(x_val, 1), xytext=(0, 12), textcoords='offset points', ha='center', va='bottom', color='#ff3333', weight='bold')
-        ax4.set_title("4. Box Plot (Outliers Detection)", color='white')
-        ax4.set_yticks([])
+        # --- BOTTOM ACTION BAR ---
+        col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+        col_b1.metric("⬇️ MIN Weight", f"{min_val:.4f} g")
+        col_b2.metric("⬆️ MAX Weight", f"{max_val:.4f} g")
+        col_b3.metric("📊 STD", f"{sd_val:.4f}")
 
-        fig.tight_layout(pad=2.0)
-        st.pyplot(fig) 
+        if n > 1:
+            with col_b4:
+                # 1. ปุ่ม Save History
+                if st.button("💾 Save Record to History", type="primary", use_container_width=True):
+                    save_to_history(part_no, n, mean_val, sd_val, cv_val, error_pieces, status_result, weights)
+                    st.success(f"บันทึกประวัติ Part: {part_no} เรียบร้อยแล้ว! (ดูได้ที่แท็บ History Logs)")
 
-    st.divider()
-    col_b1, col_b2, col_b3, col_b4 = st.columns(4)
-    col_b1.metric("⬇️ MIN Weight", f"{min_val:.4f} g")
-    col_b2.metric("⬆️ MAX Weight", f"{max_val:.4f} g")
-    col_b3.metric("📊 STD", f"{sd_val:.4f}")
-
-    # ==================== PDF EXPORT (PRINT-FRIENDLY THEME) ====================
-    if n > 1:
-        with col_b4:
-            st.write("📄 **Export Report**")
-            buffer = io.BytesIO()
-            with PdfPages(buffer) as pdf:
-                # --- PAGE 1: DASHBOARD ---
-                pdf_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white') 
-                
-                pdf_fig.text(0.5, 0.94, "ZERO DEFECT: SCALE VALIDATION REPORT", fontsize=18, weight='bold', ha='center', color='black')
-                pdf_fig.text(0.1, 0.89, f"Part Number: {part_no}", fontsize=12, color='black')
-                pdf_fig.text(0.1, 0.86, f"Sample Size: {n} pcs", fontsize=12, color='black')
-                pdf_fig.text(0.55, 0.89, f"Full SNP Target: {full_snp} pcs/pack", fontsize=12, weight='bold', color='black')
-                
-                # ลบเส้นเอียงออกเรียบร้อยแล้วครับ
-                
-                status_pdf = "PASSED" if error_pieces <= 0.5 else "FAILED (Miscount Risk)"
-                pdf_fig.text(0.1, 0.80, "Analysis Result:", fontsize=14, weight='bold', color='black')
-                pdf_fig.text(0.15, 0.77, f"- Average (APW) : {mean_val:.4f} g", fontsize=12, color='black')
-                pdf_fig.text(0.15, 0.74, f"- STD           : {sd_val:.4f}", fontsize=12, color='black')
-                pdf_fig.text(0.15, 0.71, f"- Min / Max     : {min_val:.4f} g / {max_val:.4f} g", fontsize=12, color='black')
-                pdf_fig.text(0.15, 0.68, f"- Max Error     : +/- {error_pieces:.2f} pieces", fontsize=12, weight='bold', color='red' if error_pieces > 0.5 else 'green')
-                pdf_fig.text(0.15, 0.63, f"Conclusion: {status_pdf}", fontsize=16, weight='bold', color='red' if error_pieces > 0.5 else 'green')
-
-                # PDF Charts Area
-                ax1_p = pdf_fig.add_axes([0.1, 0.38, 0.35, 0.15]) 
-                ax2_p = pdf_fig.add_axes([0.55, 0.38, 0.35, 0.15])
-                ax3_p = pdf_fig.add_axes([0.1, 0.15, 0.35, 0.15])
-                ax4_p = pdf_fig.add_axes([0.55, 0.15, 0.35, 0.15])
-
-                for ax in [ax1_p, ax2_p, ax3_p, ax4_p]:
-                    ax.set_facecolor('white')
-                    ax.tick_params(colors='black')
-                    for spine in ax.spines.values(): spine.set_color('black')
-
-                # 1. Histogram PDF
-                ax1_p.hist(weights, bins=max(5, int(n**0.5)), density=True, color='#3498db', edgecolor='black', alpha=0.6)
-                if sd_val > 0:
-                    ax1_p.plot(x_curve, y_curve, color='red', linewidth=2)
-                ax1_p.set_title("1. Distribution (Bell Curve)", color='black', fontsize=9)
-                
-                # 2. Run Chart PDF
-                ax2_p.plot(x_seq, weights, marker='o', color='#2ecc71', markersize=3)
-                ax2_p.axhline(y=mean_val, color='red', linestyle='--')
-                ax2_p.set_title("2. Run Chart", color='black', fontsize=9)
-
-                # 3. Scatter Plot PDF
-                ax3_p.scatter(x_seq, weights, color='#f1c40f', edgecolor='black', s=20)
-                if sd_val > 0:
-                    ax3_p.text(0.05, 0.90, f"r = {r_val:.3f}", transform=ax3_p.transAxes, color='black', weight='bold', fontsize=8)
-                    ax3_p.plot(x_seq, p(x_seq), color='purple', linestyle=':')
-                ax3_p.set_title("3. Scatter Plot", color='black', fontsize=9)
-
-                # 4. Box Plot PDF
-                bp_p = ax4_p.boxplot(weights, vert=False, patch_artist=True)
-                for patch in bp_p['boxes']: patch.set_facecolor('#9b59b6')
-                for median in bp_p['medians']: median.set(color='red', linewidth=2)
-                for flier in bp_p['fliers']: 
-                    flier.set(marker='o', markerfacecolor='red', markeredgecolor='black', markersize=6)
-                
-                outlier_data_p = bp_p['fliers'][0].get_xdata()
-                for x_val in np.unique(outlier_data_p):
-                    indices = [i+1 for i, w in enumerate(weights) if w == x_val]
-                    label = ",".join([f"#{i}" for i in indices])
-                    ax4_p.annotate(label, xy=(x_val, 1), xytext=(0, 8), textcoords='offset points', ha='center', va='bottom', color='red', fontsize=7, weight='bold')
-                
-                ax4_p.set_title("4. Box Plot (Outliers)", color='black', fontsize=9)
-                ax4_p.set_yticks([])
-
-                pdf.savefig(pdf_fig)
-                plt.close(pdf_fig)
-
-                # --- PAGE 2+: RAW DATA SUPPORT ---
-                MAX_ROWS_PER_COL = 40
-                MAX_COLS_PER_PAGE = 4 
-                MAX_ITEMS_PER_PAGE = MAX_ROWS_PER_COL * MAX_COLS_PER_PAGE
-                
-                pages_needed = math.ceil(n / MAX_ITEMS_PER_PAGE)
-                
-                for page_num in range(pages_needed):
-                    data_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white')
-                    data_fig.text(0.5, 0.92, f"RAW DATA RECORD (Page {page_num+1}/{pages_needed})", fontsize=16, weight='bold', ha='center', color='black')
-                    data_fig.text(0.1, 0.86, f"Part Number: {part_no}", fontsize=11, color='black')
+                # 2. ปุ่ม Download PDF
+                buffer = io.BytesIO()
+                with PdfPages(buffer) as pdf:
+                    pdf_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white') 
                     
-                    # ลบเส้นเอียงออกเรียบร้อยแล้วครับ
+                    pdf_fig.text(0.5, 0.94, "ZERO DEFECT: SCALE VALIDATION REPORT", fontsize=18, weight='bold', ha='center', color='black')
+                    pdf_fig.text(0.1, 0.89, f"Part Number: {part_no}", fontsize=12, color='black')
+                    pdf_fig.text(0.1, 0.86, f"Sample Size: {n} pcs", fontsize=12, color='black')
+                    pdf_fig.text(0.55, 0.89, f"Full SNP Target: {full_snp} pcs/pack", fontsize=12, weight='bold', color='black')
                     
-                    y_pos = 0.83
-                    col_x = [0.10, 0.32, 0.54, 0.76] 
-                    current_col = 0
+                    status_pdf = "PASSED" if error_pieces <= 0.5 else "FAILED (Miscount Risk)"
+                    pdf_fig.text(0.1, 0.80, "Analysis Result:", fontsize=14, weight='bold', color='black')
+                    pdf_fig.text(0.15, 0.77, f"- Average (APW) : {mean_val:.4f} g", fontsize=12, color='black')
+                    pdf_fig.text(0.15, 0.74, f"- STD           : {sd_val:.4f}", fontsize=12, color='black')
+                    pdf_fig.text(0.15, 0.71, f"- Min / Max     : {min_val:.4f} g / {max_val:.4f} g", fontsize=12, color='black')
+                    pdf_fig.text(0.15, 0.68, f"- Max Error     : +/- {error_pieces:.2f} pieces", fontsize=12, weight='bold', color='red' if error_pieces > 0.5 else 'green')
+                    pdf_fig.text(0.15, 0.63, f"Conclusion: {status_pdf}", fontsize=16, weight='bold', color='red' if error_pieces > 0.5 else 'green')
+
+                    ax1_p = pdf_fig.add_axes([0.1, 0.38, 0.35, 0.15]) 
+                    ax2_p = pdf_fig.add_axes([0.55, 0.38, 0.35, 0.15])
+                    ax3_p = pdf_fig.add_axes([0.1, 0.15, 0.35, 0.15])
+                    ax4_p = pdf_fig.add_axes([0.55, 0.15, 0.35, 0.15])
+
+                    for ax in [ax1_p, ax2_p, ax3_p, ax4_p]:
+                        ax.set_facecolor('white')
+                        ax.tick_params(colors='black')
+                        for spine in ax.spines.values(): spine.set_color('black')
+
+                    ax1_p.hist(weights, bins=max(5, int(n**0.5)), density=True, color='#3498db', edgecolor='black', alpha=0.6)
+                    if sd_val > 0: ax1_p.plot(x_curve, y_curve, color='red', linewidth=2)
+                    ax1_p.set_title("1. Distribution", color='black', fontsize=9)
                     
-                    start_idx = page_num * MAX_ITEMS_PER_PAGE
-                    end_idx = min(start_idx + MAX_ITEMS_PER_PAGE, n)
+                    ax2_p.plot(x_seq, weights, marker='o', color='#2ecc71', markersize=3)
+                    ax2_p.axhline(y=mean_val, color='red', linestyle='--')
+                    ax2_p.set_title("2. Run Chart", color='black', fontsize=9)
+
+                    ax3_p.scatter(x_seq, weights, color='#f1c40f', edgecolor='black', s=20)
+                    if sd_val > 0:
+                        ax3_p.text(0.05, 0.90, f"r = {r_val:.3f}", transform=ax3_p.transAxes, color='black', weight='bold', fontsize=8)
+                        ax3_p.plot(x_seq, p(x_seq), color='purple', linestyle=':')
+                    ax3_p.set_title("3. Scatter Plot", color='black', fontsize=9)
+
+                    bp_p = ax4_p.boxplot(weights, vert=False, patch_artist=True)
+                    for patch in bp_p['boxes']: patch.set_facecolor('#9b59b6')
+                    for median in bp_p['medians']: median.set(color='red', linewidth=2)
+                    for flier in bp_p['fliers']: flier.set(marker='o', markerfacecolor='red', markeredgecolor='black', markersize=6)
                     
-                    for i in range(start_idx, end_idx):
-                        w = weights[i]
-                        data_fig.text(col_x[current_col], y_pos, f"#{i+1:03d}: {w:.4f}g", fontsize=10, fontfamily='monospace', color='black')
-                        y_pos -= 0.018 
+                    outlier_data_p = bp_p['fliers'][0].get_xdata()
+                    for x_val in np.unique(outlier_data_p):
+                        indices = [i+1 for i, w in enumerate(weights) if w == x_val]
+                        label = ",".join([f"#{i}" for i in indices])
+                        ax4_p.annotate(label, xy=(x_val, 1), xytext=(0, 8), textcoords='offset points', ha='center', va='bottom', color='red', fontsize=7, weight='bold')
+                    ax4_p.set_title("4. Box Plot (Outliers)", color='black', fontsize=9)
+                    ax4_p.set_yticks([])
+
+                    pdf.savefig(pdf_fig)
+                    plt.close(pdf_fig)
+
+                    # PDF Page 2+ (Raw Data)
+                    MAX_ROWS_PER_COL = 40
+                    MAX_COLS_PER_PAGE = 4 
+                    MAX_ITEMS_PER_PAGE = MAX_ROWS_PER_COL * MAX_COLS_PER_PAGE
+                    pages_needed = math.ceil(n / MAX_ITEMS_PER_PAGE)
+                    
+                    for page_num in range(pages_needed):
+                        data_fig = plt.figure(figsize=(8.27, 11.69), facecolor='white')
+                        data_fig.text(0.5, 0.92, f"RAW DATA RECORD (Page {page_num+1}/{pages_needed})", fontsize=16, weight='bold', ha='center', color='black')
+                        data_fig.text(0.1, 0.86, f"Part Number: {part_no}", fontsize=11, color='black')
                         
-                        if y_pos < 0.08: 
-                            y_pos = 0.83 
-                            current_col += 1 
-                            
-                    pdf.savefig(data_fig)
-                    plt.close(data_fig)
+                        y_pos = 0.83
+                        col_x = [0.10, 0.32, 0.54, 0.76] 
+                        current_col = 0
+                        start_idx = page_num * MAX_ITEMS_PER_PAGE
+                        end_idx = min(start_idx + MAX_ITEMS_PER_PAGE, n)
+                        
+                        for i in range(start_idx, end_idx):
+                            w = weights[i]
+                            data_fig.text(col_x[current_col], y_pos, f"#{i+1:03d}: {w:.4f}g", fontsize=10, fontfamily='monospace', color='black')
+                            y_pos -= 0.018 
+                            if y_pos < 0.08: 
+                                y_pos = 0.83 
+                                current_col += 1 
+                                
+                        pdf.savefig(data_fig)
+                        plt.close(data_fig)
 
-            st.download_button(
-                label="📥 Download Perfect PDF Report",
-                data=buffer.getvalue(),
-                file_name=f"Validation_{part_no}.pdf",
-                mime="application/pdf",
-                type="primary"
-            )
+                st.download_button(
+                    label="📥 Download PDF Report",
+                    data=buffer.getvalue(),
+                    file_name=f"Validation_{part_no}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
 
-    with st.expander("👀 View Raw Data Record"):
-        df_display = pd.DataFrame({"Sample #": range(1, n+1), "Weight (g)": weights})
-        st.dataframe(df_display, use_container_width=True)
+        with st.expander("👀 View Raw Data Record"):
+            df_display = pd.DataFrame({"Sample #": range(1, n+1), "Weight (g)": weights})
+            st.dataframe(df_display, use_container_width=True)
+
+
+# -------------------- TAB 2: HISTORY LOGS --------------------
+with tab2:
+    st.header("🗄️ Validation History Database")
+    history_file = "validation_history.csv"
+    
+    if os.path.isfile(history_file):
+        df_history = pd.read_csv(history_file)
+        
+        # ค้นหาตาม Part Number ได้
+        search_part = st.text_input("🔍 Search by Part Number:")
+        if search_part:
+            df_history = df_history[df_history['Part Number'].astype(str).str.contains(search_part, case=False)]
+            
+        st.write(f"พบข้อมูลทั้งหมด {len(df_history)} รายการ")
+        
+        # แสดงตารางประวัติการทำงาน (ไฮไลต์สี Pass/Fail ได้ด้วย)
+        def color_status(val):
+            color = '#28a745' if val == 'PASSED' else '#dc3545'
+            return f'color: {color}; font-weight: bold'
+            
+        st.dataframe(
+            df_history.style.map(color_status, subset=['Status']), 
+            use_container_width=True, 
+            hide_index=True
+        )
+        
+        # ปุ่มโหลดประวัติเป็น Excel สำหรับส่ง Report รายเดือน
+        csv = df_history.to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            label="📥 Download History to CSV (สำหรับ Excel)",
+            data=csv,
+            file_name="Master_Validation_History.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("ยังไม่มีประวัติการตรวจสอบครับ ลองกดปุ่ม 'Save Record to History' ในหน้า Dashboard ดูสิครับ!")
